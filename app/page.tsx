@@ -91,6 +91,29 @@ export default function ChatPage() {
     }
   }
 
+  function renderWithLinks(text: string) {
+    const urlRegex = /https?:\/\/[^\s]+/g;
+    const parts = text.split(urlRegex);
+    const matches = text.match(urlRegex) ?? [];
+    return parts.flatMap((part, i) => {
+      const nodes: React.ReactNode[] = [part];
+      if (matches[i]) {
+        nodes.push(
+          <a
+            key={i}
+            href={matches[i]}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline text-amber-700 hover:text-amber-900 break-all"
+          >
+            {matches[i]}
+          </a>
+        );
+      }
+      return nodes;
+    });
+  }
+
   const isEmpty = messages.length === 0;
 
   return (
@@ -145,7 +168,7 @@ export default function ChatPage() {
               >
                 {msg.role === "assistant" && (
                   <div className="w-7 h-7 rounded-full bg-amber-500 flex items-center justify-center text-white text-xs font-bold shrink-0 mt-0.5 mr-2">
-                    CL
+                    OC
                   </div>
                 )}
                 <div
@@ -162,7 +185,7 @@ export default function ChatPage() {
                       <span className="w-1.5 h-1.5 bg-stone-400 rounded-full animate-bounce [animation-delay:300ms]" />
                     </span>
                   ) : (
-                    <span className="whitespace-pre-wrap">{msg.content}</span>
+                    <span className="whitespace-pre-wrap">{renderWithLinks(msg.content)}</span>
                   )}
                 </div>
               </div>
