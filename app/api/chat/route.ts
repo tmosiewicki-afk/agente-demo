@@ -18,6 +18,12 @@ Costa Rica 6020, Palermo, CABA
 
 HORARIOS:
 Todos los días excepto los martes, de 9:00 a 20:00.
+- Desayuno: 9:00 a 12:30
+- Almuerzo: 12:30 a 16:00
+- Merienda: 16:00 a 20:00
+
+RESERVAS:
+No se toman reservas. La atención es por orden de llegada.
 
 MENÚ:
 Cuando alguien pregunte por el menú, compartí este enlace y aclará que ahí está el menú actualizado: https://ugc.production.linktr.ee/18a232c0-868f-4a75-8784-384c9f4dd257_MENU-OLI-ESPAOL-9.04.pdf
