@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Café Luna – Atención al Cliente",
-  description: "Asistente virtual de Café Luna",
+  title: "Oli Café – Atención al Cliente",
+  description: "Asistente virtual de Oli Café",
 };
 
 export default function RootLayout({

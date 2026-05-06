@@ -98,11 +98,11 @@ export default function ChatPage() {
       {/* Header */}
       <header className="bg-white border-b border-stone-200 px-4 py-3 flex items-center gap-3 shadow-sm">
         <div className="w-9 h-9 rounded-full bg-amber-500 flex items-center justify-center text-white font-bold text-sm shrink-0">
-          CL
+          OC
         </div>
         <div>
           <h1 className="font-semibold text-stone-800 leading-tight">
-            Café Luna
+            Oli Café
           </h1>
           <p className="text-xs text-stone-500">Atención al cliente · En línea</p>
         </div>
