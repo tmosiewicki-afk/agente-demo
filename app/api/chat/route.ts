@@ -1,12 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { consultarProducto } from "@/lib/sheets";
 
 const client = new Anthropic();
 
-// El prompt del sistema describe el negocio y sus FAQs.
-// Usamos cache_control para evitar re-procesar este texto en cada turno.
-const SYSTEM_PROMPT = `Sos un agente de atención al cliente de Oli Café. Respondé preguntas usando la información a continuación. El tono debe ser profesional y cálido, sin usar emojis. Sé directo y breve. Si te preguntan algo que no figura aquí, indicá amablemente que lo vas a consultar con el equipo.
+const SYSTEM_PROMPT = `Sos un agente de atención al cliente de Oli Café. Respondé preguntas usando la información a continuación y las herramientas disponibles. El tono debe ser profesional y cálido, sin usar emojis. Sé directo y breve. Si te preguntan algo que no figura aquí, indicá amablemente que lo vas a consultar con el equipo.
 
 ━━━━━━━━━━━━━━━━━━━━━━
 INFORMACIÓN DEL NEGOCIO
@@ -27,10 +26,113 @@ RESERVAS:
 No se toman reservas. La atención es por orden de llegada.
 
 MENÚ:
-Cuando alguien pregunte por el menú, compartí este enlace y aclará que ahí está el menú actualizado: https://ugc.production.linktr.ee/18a232c0-868f-4a75-8784-384c9f4dd257_MENU-OLI-ESPAOL-9.04.pdf
+Si alguien pide el menú completo, compartí este enlace: https://ugc.production.linktr.ee/18a232c0-868f-4a75-8784-384c9f4dd257_MENU-OLI-ESPAOL-9.04.pdf
 
 MASCOTAS:
-El local es pet friendly. Hay agua disponible para perros.`;
+El local es pet friendly. Hay agua disponible para perros.
+
+━━━━━━━━━━━━━━━━━━━━━━
+STOCK E INVENTARIO
+━━━━━━━━━━━━━━━━━━━━━━
+
+Cuando alguien pregunte por disponibilidad o descripción de un producto de COMIDA, usá la herramienta consultar_stock.
+
+Según el stock obtenido, respondé exactamente así:
+- 10 o más → "sí tenemos"
+- 3 a 9 → "quedan pocos"
+- 1 o 2 → "vení rápido que queda el último"
+- 0 → "por hoy se terminó"
+
+Para BEBIDAS (café, cortado, latte, capuchino, té, jugo, agua, licuado, etc.) siempre respondé que están disponibles, sin usar la herramienta.`;
+
+const TOOLS: Anthropic.Tool[] = [
+  {
+    name: "consultar_stock",
+    description:
+      "Consulta el stock disponible y la descripción de un producto de comida del inventario. Usá esta herramienta para productos de comida, nunca para bebidas.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        producto: {
+          type: "string",
+          description: "Nombre o parte del nombre del producto a consultar",
+        },
+      },
+      required: ["producto"],
+    },
+  },
+];
+
+async function ejecutarHerramienta(
+  nombre: string,
+  input: Record<string, string>
+): Promise<string> {
+  if (nombre === "consultar_stock") {
+    const producto = await consultarProducto(input.producto);
+    if (!producto) {
+      return JSON.stringify({ encontrado: false });
+    }
+    return JSON.stringify({
+      encontrado: true,
+      nombre: producto.nombre,
+      descripcion: producto.descripcion,
+      precio: producto.precio,
+      stock: producto.stock,
+    });
+  }
+  return JSON.stringify({ error: "herramienta desconocida" });
+}
+
+async function loopAgente(
+  messages: Anthropic.MessageParam[]
+): Promise<string> {
+  let mensajesActuales = [...messages];
+
+  while (true) {
+    const respuesta = await client.messages.create({
+      model: "claude-opus-4-7",
+      max_tokens: 1024,
+      system: [
+        {
+          type: "text",
+          text: SYSTEM_PROMPT,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
+      tools: TOOLS,
+      messages: mensajesActuales,
+    });
+
+    if (respuesta.stop_reason === "end_turn") {
+      const bloque = respuesta.content.find((b) => b.type === "text");
+      return bloque?.type === "text" ? bloque.text : "";
+    }
+
+    if (respuesta.stop_reason === "tool_use") {
+      mensajesActuales.push({
+        role: "assistant",
+        content: respuesta.content,
+      });
+
+      const resultados: Anthropic.ToolResultBlockParam[] = [];
+      for (const bloque of respuesta.content) {
+        if (bloque.type === "tool_use") {
+          const resultado = await ejecutarHerramienta(
+            bloque.name,
+            bloque.input as Record<string, string>
+          );
+          resultados.push({
+            type: "tool_result",
+            tool_use_id: bloque.id,
+            content: resultado,
+          });
+        }
+      }
+
+      mensajesActuales.push({ role: "user", content: resultados });
+    }
+  }
+}
 
 async function saveConversation(
   sessionId: string,
@@ -49,47 +151,26 @@ async function saveConversation(
 export async function POST(req: NextRequest) {
   const { messages, sessionId } = await req.json();
 
-  const stream = await client.messages.stream({
-    model: "claude-opus-4-7",
-    max_tokens: 1024,
-    system: [
-      {
-        type: "text",
-        text: SYSTEM_PROMPT,
-        // El FAQ es estático: lo cacheamos para ahorrar tokens en cada turno
-        cache_control: { type: "ephemeral" },
-      },
-    ],
-    messages,
-  });
-
   const encoder = new TextEncoder();
   let assistantContent = "";
 
   const readableStream = new ReadableStream({
     async start(controller) {
-      for await (const event of stream) {
-        if (
-          event.type === "content_block_delta" &&
-          event.delta.type === "text_delta"
-        ) {
-          assistantContent += event.delta.text;
-          controller.enqueue(encoder.encode(event.delta.text));
-        }
+      try {
+        assistantContent = await loopAgente(messages);
+        controller.enqueue(encoder.encode(assistantContent));
+      } finally {
+        controller.close();
       }
-      controller.close();
 
-      if (sessionId) {
-        const allMessages = [
+      if (sessionId && assistantContent) {
+        await saveConversation(sessionId, [
           ...messages,
           { role: "assistant", content: assistantContent },
-        ];
-        await saveConversation(sessionId, allMessages);
+        ]);
       }
     },
-    cancel() {
-      stream.controller.abort();
-    },
+    cancel() {},
   });
 
   return new Response(readableStream, {
