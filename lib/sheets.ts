@@ -26,10 +26,23 @@ function parsearLinea(linea: string): string[] {
   return resultado;
 }
 
-export async function fetchInventario(): Promise<ProductoInventario[]> {
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv`;
+async function fetchGIDs(): Promise<number[]> {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/htmlview`;
+  const res = await fetch(url, { next: { revalidate: 3600 } });
+  if (!res.ok) return [0];
+
+  const html = await res.text();
+  const matches = [...html.matchAll(/gid=(\d+)/g)];
+  const gids = [...new Set(matches.map((m) => parseInt(m[1])))].filter(
+    (g) => !isNaN(g)
+  );
+  return gids.length > 0 ? gids : [0];
+}
+
+async function fetchHoja(gid: number): Promise<ProductoInventario[]> {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${gid}`;
   const res = await fetch(url, { next: { revalidate: 60 } });
-  if (!res.ok) throw new Error("No se pudo acceder al inventario");
+  if (!res.ok) return [];
 
   const csv = await res.text();
   const lineas = csv.trim().split("\n");
@@ -48,19 +61,23 @@ export async function fetchInventario(): Promise<ProductoInventario[]> {
     .filter((p) => p.nombre);
 }
 
+export async function fetchInventario(): Promise<ProductoInventario[]> {
+  const gids = await fetchGIDs();
+  const hojas = await Promise.all(gids.map(fetchHoja));
+  return hojas.flat();
+}
+
 export async function consultarProducto(
   busqueda: string
 ): Promise<ProductoInventario | null> {
   const inventario = await fetchInventario();
   const query = busqueda.toLowerCase().trim();
 
-  // Primero busca coincidencia directa
   const directa = inventario.find((p) =>
     p.nombre.toLowerCase().includes(query)
   );
   if (directa) return directa;
 
-  // Fallback: cualquier palabra significativa del query
   const palabras = query.split(/\s+/).filter((p) => p.length > 2);
   return (
     inventario.find((p) =>
