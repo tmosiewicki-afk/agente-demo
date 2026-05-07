@@ -7,6 +7,11 @@ export interface ProductoInventario {
   stock: number;
 }
 
+interface HojaInfo {
+  gid: number;
+  nombre: string;
+}
+
 function parsearLinea(linea: string): string[] {
   const resultado: string[] = [];
   let campo = "";
@@ -26,17 +31,19 @@ function parsearLinea(linea: string): string[] {
   return resultado;
 }
 
-async function fetchGIDs(): Promise<number[]> {
+async function fetchHojas(): Promise<HojaInfo[]> {
   const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/htmlview`;
   const res = await fetch(url, { next: { revalidate: 3600 } });
-  if (!res.ok) return [0];
+  if (!res.ok) return [{ gid: 0, nombre: "" }];
 
   const html = await res.text();
-  const matches = [...html.matchAll(/gid=(\d+)/g)];
-  const gids = [...new Set(matches.map((m) => parseInt(m[1])))].filter(
-    (g) => !isNaN(g)
-  );
-  return gids.length > 0 ? gids : [0];
+  const matches = [
+    ...html.matchAll(/items\.push\(\{name: "([^"]+)"[^}]+gid: "(\d+)"/g),
+  ];
+
+  if (matches.length === 0) return [{ gid: 0, nombre: "" }];
+
+  return matches.map((m) => ({ nombre: m[1], gid: parseInt(m[2]) }));
 }
 
 async function fetchHoja(gid: number): Promise<ProductoInventario[]> {
@@ -62,9 +69,40 @@ async function fetchHoja(gid: number): Promise<ProductoInventario[]> {
 }
 
 export async function fetchInventario(): Promise<ProductoInventario[]> {
-  const gids = await fetchGIDs();
-  const hojas = await Promise.all(gids.map(fetchHoja));
-  return hojas.flat();
+  const hojas = await fetchHojas();
+  const resultados = await Promise.all(hojas.map((h) => fetchHoja(h.gid)));
+  return resultados.flat();
+}
+
+export async function listarPorComida(
+  comida: string
+): Promise<ProductoInventario[]> {
+  const hojas = await fetchHojas();
+  const q = comida.toLowerCase();
+
+  const hojaTodoElDia = hojas.find((h) =>
+    h.nombre.toLowerCase().includes("todo")
+  );
+
+  const hojaComida = hojas.find((h) => {
+    const n = h.nombre.toLowerCase();
+    if (q === "almuerzo") return n.includes("almuerzo");
+    if (q === "desayuno" || q === "merienda")
+      return n.includes("desayuno") || n.includes("merienda");
+    return false;
+  });
+
+  const gidsAFetchear = [
+    ...(hojaComida ? [hojaComida.gid] : []),
+    ...(hojaTodoElDia && hojaTodoElDia.gid !== hojaComida?.gid
+      ? [hojaTodoElDia.gid]
+      : []),
+  ];
+
+  if (gidsAFetchear.length === 0) return fetchInventario();
+
+  const resultados = await Promise.all(gidsAFetchear.map(fetchHoja));
+  return resultados.flat();
 }
 
 export async function consultarProducto(

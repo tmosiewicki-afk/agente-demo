@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { consultarProducto } from "@/lib/sheets";
+import { consultarProducto, listarPorComida } from "@/lib/sheets";
 
 const client = new Anthropic();
 
@@ -25,9 +25,6 @@ Todos los días excepto los martes, de 9:00 a 20:00.
 RESERVAS:
 No se toman reservas. La atención es por orden de llegada.
 
-MENÚ:
-Si alguien pide el menú completo, compartí este enlace: https://ugc.production.linktr.ee/18a232c0-868f-4a75-8784-384c9f4dd257_MENU-OLI-ESPAOL-9.04.pdf
-
 MASCOTAS:
 El local es pet friendly. Hay agua disponible para perros.
 
@@ -35,21 +32,25 @@ El local es pet friendly. Hay agua disponible para perros.
 STOCK E INVENTARIO
 ━━━━━━━━━━━━━━━━━━━━━━
 
-Cuando alguien pregunte por disponibilidad o descripción de un producto de COMIDA, usá la herramienta consultar_stock.
+Cuando alguien pregunte por disponibilidad o descripción de un producto de COMIDA específico, usá la herramienta consultar_stock.
 
-Según el stock obtenido, respondé exactamente así:
+Cuando alguien pregunte qué hay para comer en un momento del día (desayuno, almuerzo, merienda), usá la herramienta listar_carta para obtener las opciones disponibles. Presentá los productos con su disponibilidad según el stock, y al final agregá: "También podés ver la carta completa en https://ugc.production.linktr.ee/18a232c0-868f-4a75-8784-384c9f4dd257_MENU-OLI-ESPAOL-9.04.pdf"
+
+Si alguien pide el menú completo sin especificar momento del día, compartí directamente el enlace: https://ugc.production.linktr.ee/18a232c0-868f-4a75-8784-384c9f4dd257_MENU-OLI-ESPAOL-9.04.pdf
+
+Según el stock de cada producto, respondé exactamente así:
 - 10 o más → "sí tenemos"
 - 3 a 9 → "quedan pocos"
 - 1 o 2 → "vení rápido que queda el último"
-- 0 → "por hoy se terminó"
+- 0 → "por hoy se terminó" (igual mencionalo en la lista para que el cliente sepa que existe)
 
-Para BEBIDAS (café, cortado, latte, capuchino, té, jugo, agua, licuado, etc.) siempre respondé que están disponibles, sin usar la herramienta.`;
+Para BEBIDAS (café, cortado, latte, capuchino, té, jugo, agua, licuado, etc.) siempre respondé que están disponibles, sin usar ninguna herramienta.`;
 
 const TOOLS: Anthropic.Tool[] = [
   {
     name: "consultar_stock",
     description:
-      "Consulta el stock disponible y la descripción de un producto de comida del inventario. Usá esta herramienta para productos de comida, nunca para bebidas.",
+      "Consulta el stock disponible y la descripción de un producto de comida específico. Usá esta herramienta cuando alguien pregunta por un producto puntual, nunca para bebidas.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -61,6 +62,22 @@ const TOOLS: Anthropic.Tool[] = [
       required: ["producto"],
     },
   },
+  {
+    name: "listar_carta",
+    description:
+      "Lista todos los productos disponibles para un momento del día. Incluye automáticamente los productos de 'Todo el día'. Usá esta herramienta cuando alguien pregunta qué hay para desayunar, almorzar o merendar.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        comida: {
+          type: "string",
+          enum: ["desayuno", "almuerzo", "merienda"],
+          description: "El momento del día a consultar",
+        },
+      },
+      required: ["comida"],
+    },
+  },
 ];
 
 async function ejecutarHerramienta(
@@ -69,9 +86,7 @@ async function ejecutarHerramienta(
 ): Promise<string> {
   if (nombre === "consultar_stock") {
     const producto = await consultarProducto(input.producto);
-    if (!producto) {
-      return JSON.stringify({ encontrado: false });
-    }
+    if (!producto) return JSON.stringify({ encontrado: false });
     return JSON.stringify({
       encontrado: true,
       nombre: producto.nombre,
@@ -80,6 +95,19 @@ async function ejecutarHerramienta(
       stock: producto.stock,
     });
   }
+
+  if (nombre === "listar_carta") {
+    const productos = await listarPorComida(input.comida);
+    return JSON.stringify(
+      productos.map((p) => ({
+        nombre: p.nombre,
+        descripcion: p.descripcion,
+        precio: p.precio,
+        stock: p.stock,
+      }))
+    );
+  }
+
   return JSON.stringify({ error: "herramienta desconocida" });
 }
 
