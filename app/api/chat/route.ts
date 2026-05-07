@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest } from "next/server";
+import { supabase } from "@/lib/supabase";
 
 const client = new Anthropic();
 
@@ -31,8 +32,22 @@ Cuando alguien pregunte por el menú, compartí este enlace y aclará que ahí e
 MASCOTAS:
 El local es pet friendly. Hay agua disponible para perros.`;
 
+async function saveConversation(
+  sessionId: string,
+  messages: { role: string; content: string }[]
+) {
+  await supabase.from("conversations").upsert(
+    {
+      session_id: sessionId,
+      messages,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "session_id" }
+  );
+}
+
 export async function POST(req: NextRequest) {
-  const { messages } = await req.json();
+  const { messages, sessionId } = await req.json();
 
   const stream = await client.messages.stream({
     model: "claude-opus-4-7",
@@ -49,6 +64,7 @@ export async function POST(req: NextRequest) {
   });
 
   const encoder = new TextEncoder();
+  let assistantContent = "";
 
   const readableStream = new ReadableStream({
     async start(controller) {
@@ -57,10 +73,19 @@ export async function POST(req: NextRequest) {
           event.type === "content_block_delta" &&
           event.delta.type === "text_delta"
         ) {
+          assistantContent += event.delta.text;
           controller.enqueue(encoder.encode(event.delta.text));
         }
       }
       controller.close();
+
+      if (sessionId) {
+        const allMessages = [
+          ...messages,
+          { role: "assistant", content: assistantContent },
+        ];
+        await saveConversation(sessionId, allMessages);
+      }
     },
     cancel() {
       stream.controller.abort();

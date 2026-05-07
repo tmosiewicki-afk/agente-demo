@@ -22,6 +22,7 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const sessionId = useRef<string>(crypto.randomUUID());
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -47,7 +48,7 @@ export default function ChatPage() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: newMessages }),
+        body: JSON.stringify({ messages: newMessages, sessionId: sessionId.current }),
       });
 
       if (!res.ok) throw new Error("Error en la respuesta del servidor");
